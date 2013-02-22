@@ -9,7 +9,7 @@ SQL::Easy - extremely easy access to sql data
 
 =head1 VERSION
 
-Version 0.05
+Version 0.06
 
 =head1 DESCRIPTION
 
@@ -52,16 +52,16 @@ Then we we can do some things with SQL::Easy
     } );
 
     # get scalar
-    my $posts_count = $se->return_one("select count(id) from posts");
+    my $posts_count = $se->get_one("select count(id) from posts");
 
     # get list
-    my ($dt, $title) = $se->return_row(
+    my ($dt, $title) = $se->get_row(
         "select dt, title from posts where id = ?",
         1,
     );
 
     # get arrayref
-    my $posts = $se->return_data(
+    my $posts = $se->get_data(
         "select dt_post, title from posts order by id"
     );
     # We will get
@@ -94,36 +94,13 @@ If it passed more than 'connection_check_threshold' seconds between requests
 the module will check that db connection is alive and reconnect if it went
 away.
 
-=head1 AUTHOR
-
-Ivan Bessarabov, C<< <ivan@bessarabov.ru> >>
-
-=head1 SOURCE CODE
-
-The source code for this module is hosted on GitHub
-L<https://github.com/bessarabov/SQL-Easy>
-
-=head1 BUGS
-
-Please report any bugs or feature requests in GitHub Issues
-L<https://github.com/bessarabov/SQL-Easy>
-
-=head1 LICENSE AND COPYRIGHT
-
-Copyright 2012 Ivan Bessarabov.
-
-This program is free software; you can redistribute it and/or modify it
-under the terms of either: the GNU General Public License as published
-by the Free Software Foundation; or the Artistic License.
-
-See http://dev.perl.org/licenses/ for more information.
 
 =cut
 
 use strict;
 use warnings;
 
-our $VERSION = 0.05;
+our $VERSION = 0.06;
 
 use DBI;
 use Carp;
@@ -190,7 +167,7 @@ sub new {
     return $self;
 }
 
-=head2 return_dbh
+=head2 get_dbh
 
 B<Get:> 1) $self
 
@@ -198,7 +175,7 @@ B<Return:> 1) $ with dbi handler
 
 =cut
 
-sub return_dbh {
+sub get_dbh {
     my ($self) = @_;
 
     $self->_reconnect_if_needed();
@@ -206,7 +183,15 @@ sub return_dbh {
     return $self->{dbh};
 }
 
-=head2 return_one
+sub return_dbh {
+    my ($self) = @_;
+
+    $self->_deprecation_warning("dbh");
+
+    return $self->get_dbh();
+}
+
+=head2 get_one
 
 B<Get:> 1) $self 2) $sql 3) @bind_variables
 
@@ -214,7 +199,7 @@ B<Return:> 1) $ with the first value of request result
 
 =cut
 
-sub return_one {
+sub get_one {
     my ($self, $sql, @bind_variables) = @_;
 
     $self->_reconnect_if_needed();
@@ -228,7 +213,15 @@ sub return_one {
     return $row[0];
 }
 
-=head2 return_row
+sub return_one {
+    my ($self, $sql, @bind_variables) = @_;
+
+    $self->_deprecation_warning("one");
+
+    return $self->get_one($sql, @bind_variables);
+}
+
+=head2 get_row
 
 B<Get:> 1) $self 2) $sql 3) @bind_variables
 
@@ -236,7 +229,7 @@ B<Return:> 1) @ with first row in result table
 
 =cut
 
-sub return_row {
+sub get_row {
     my ($self, $sql, @bind_variables) = @_;
 
     $self->_reconnect_if_needed();
@@ -250,7 +243,15 @@ sub return_row {
     return @row;
 }
 
-=head2 return_col
+sub return_row {
+    my ($self, $sql, @bind_variables) = @_;
+
+    $self->_deprecation_warning("row");
+
+    return $self->get_row($sql, @bind_variables);
+}
+
+=head2 get_col
 
 B<Get:> 1) $self 2) $sql 3) @bind_variables
 
@@ -258,7 +259,7 @@ B<Return:> 1) @ with first column in result table
 
 =cut
 
-sub return_col {
+sub get_col {
     my ($self, $sql, @bind_variables) = @_;
     my @return;
 
@@ -275,7 +276,15 @@ sub return_col {
     return @return;
 }
 
-=head2 return_data
+sub return_col {
+    my ($self, $sql, @bind_variables) = @_;
+
+    $self->_deprecation_warning("col");
+
+    return $self->get_col($sql, @bind_variables);
+}
+
+=head2 get_data
 
 B<Get:> 1) $self 2) $sql 3) @bind_variables
 
@@ -283,7 +292,7 @@ B<Return:> 1) $ with array of hashes with the result of the query
 
 Sample usage:
 
-    my $a = $se->return_data('select * from t1');
+    my $a = $se->get_data('select * from t1');
 
     print scalar @{$a};         # quantity of returned rows
     print $a->[0]{filename};    # element 'filename' in the first row
@@ -294,7 +303,7 @@ Sample usage:
 
 =cut
 
-sub return_data {
+sub get_data {
     my ($self, $sql, @bind_variables) = @_;
     my @return;
 
@@ -322,7 +331,15 @@ sub return_data {
     return \@return;
 }
 
-=head2 return_tsv_data
+sub return_data {
+    my ($self, $sql, @bind_variables) = @_;
+
+    $self->_deprecation_warning("data");
+
+    return $self->get_data($sql, @bind_variables);
+}
+
+=head2 get_tsv_data
 
 B<Get:> 1) $self 2) $sql 3) @bind_variables
 
@@ -330,7 +347,7 @@ B<Return:> 1) $ with tab separated db data
 
 Sample usage:
 
-    print $se->return_tsv_data(
+    print $se->get_tsv_data(
         "select dt_post, title from posts order by id limit 2"
     );
 
@@ -342,7 +359,7 @@ It will output the text below (with the tabs as separators).
 
 =cut
 
-sub return_tsv_data {
+sub get_tsv_data {
     my ($self, $sql, @bind_variables) = @_;
     my $return;
 
@@ -363,6 +380,15 @@ sub return_tsv_data {
 
     return $return;
 }
+
+sub return_tsv_data {
+    my ($self, $sql, @bind_variables) = @_;
+
+    $self->_deprecation_warning("tsv_data");
+
+    return $self->get_tsv_data($sql, @bind_variables);
+}
+
 
 =head2 insert
 
@@ -524,5 +550,42 @@ sub _check_connection {
         return;
     }
 }
+
+sub _deprecation_warning {
+    my ($self, $name) = @_;
+
+    croak "Expected 'name'" unless defined $name;
+
+    warn "x"x78 . "\n";
+    warn "WARNING. SQL::Easy interface was changed. Since version 0.06 method return_$name() was deprecated. Use get_$name() instead.\n";
+    warn "x"x78 . "\n";
+
+}
+
+=head1 AUTHOR
+
+Ivan Bessarabov, C<< <ivan@bessarabov.ru> >>
+
+=head1 SOURCE CODE
+
+The source code for this module is hosted on GitHub
+L<https://github.com/bessarabov/SQL-Easy>
+
+=head1 BUGS
+
+Please report any bugs or feature requests in GitHub Issues
+L<https://github.com/bessarabov/SQL-Easy>
+
+=head1 LICENSE AND COPYRIGHT
+
+Copyright 2012 Ivan Bessarabov.
+
+This program is free software; you can redistribute it and/or modify it
+under the terms of either: the GNU General Public License as published
+by the Free Software Foundation; or the Artistic License.
+
+See http://dev.perl.org/licenses/ for more information.
+
+=cut
 
 1;

@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:               SQL-Easy
-version:            0.05
+version:            0.06
 abstract:           extremely easy access to sql data
 author:
     - Ivan Bessarabov <ivan@bessarabov.ru>
