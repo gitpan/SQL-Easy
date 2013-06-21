@@ -1,8 +1,10 @@
 Changes
+LICENSE
 MANIFEST
+META.yml
 Makefile.PL
-README
+README.md
 TODO
+dist.ini
 lib/SQL/Easy.pm
-t/001_module_loader.t
-META.yml                                 Module meta-data (added by MakeMaker)
+t/00-load.t

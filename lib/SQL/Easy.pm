@@ -1,7 +1,318 @@
 package SQL::Easy;
+{
+  $SQL::Easy::VERSION = '0.07';
+}
 
-=encoding UTF-8
-=cut
+# ABSTRACT: extremely easy access to sql data
+
+
+
+use strict;
+use warnings;
+
+use DBI;
+use Carp;
+
+
+
+sub new {
+    my ($class, $params) = @_;
+    my $self  = {};
+
+    $self->{dbh} = $params->{dbh};
+    $self->{connection_check_threshold} = $params->{connection_check_threshold} || 30;
+    $self->{debug} = $params->{debug} || 0;
+    $self->{count} = 0;
+
+    unless ($self->{dbh}) {
+        $self->{settings} = {
+            db         => $params->{database},
+            user       => $params->{user},
+            password   => $params->{password},
+            host       => $params->{host} || '127.0.0.1',
+            port       => $params->{port} || 3306,
+        };
+
+        $self->{dbh} = _get_connection($self->{settings});
+    };
+
+    $self->{last_connection_check} = time;
+
+    bless($self, $class);
+    return $self;
+}
+
+
+sub get_dbh {
+    my ($self) = @_;
+
+    $self->_reconnect_if_needed();
+
+    return $self->{dbh};
+}
+
+sub return_dbh {
+    my ($self) = @_;
+
+    $self->_deprecation_warning("dbh");
+
+    return $self->get_dbh();
+}
+
+
+sub get_one {
+    my ($self, $sql, @bind_variables) = @_;
+
+    $self->_reconnect_if_needed();
+
+    my $sth = $self->{dbh}->prepare($sql);
+    $self->log_debug($sql);
+    $sth->execute(@bind_variables) or croak $self->{dbh}->errstr;
+
+    my @row = $sth->fetchrow_array;
+
+    return $row[0];
+}
+
+sub return_one {
+    my ($self, $sql, @bind_variables) = @_;
+
+    $self->_deprecation_warning("one");
+
+    return $self->get_one($sql, @bind_variables);
+}
+
+
+sub get_row {
+    my ($self, $sql, @bind_variables) = @_;
+
+    $self->_reconnect_if_needed();
+
+    my $sth = $self->{dbh}->prepare($sql);
+    $self->log_debug($sql);
+    $sth->execute(@bind_variables) or croak $self->{dbh}->errstr;
+
+    my @row = $sth->fetchrow_array;
+
+    return @row;
+}
+
+sub return_row {
+    my ($self, $sql, @bind_variables) = @_;
+
+    $self->_deprecation_warning("row");
+
+    return $self->get_row($sql, @bind_variables);
+}
+
+
+sub get_col {
+    my ($self, $sql, @bind_variables) = @_;
+    my @return;
+
+    $self->_reconnect_if_needed();
+
+    my $sth = $self->{dbh}->prepare($sql);
+    $self->log_debug($sql);
+    $sth->execute(@bind_variables) or croak $self->{dbh}->errstr;
+
+    while (my @row = $sth->fetchrow_array) {
+        push @return, $row[0];
+    }
+
+    return @return;
+}
+
+sub return_col {
+    my ($self, $sql, @bind_variables) = @_;
+
+    $self->_deprecation_warning("col");
+
+    return $self->get_col($sql, @bind_variables);
+}
+
+
+sub get_data {
+    my ($self, $sql, @bind_variables) = @_;
+    my @return;
+
+    $self->_reconnect_if_needed();
+
+    my $sth = $self->{dbh}->prepare($sql);
+    $self->log_debug($sql);
+    $sth->execute(@bind_variables) or croak $self->{dbh}->errstr;
+
+    my @cols = @{$sth->{NAME}};
+
+    my @row;
+    my $line_counter = 0;
+    my $col_counter = 0;
+
+    while (@row = $sth->fetchrow_array) {
+        $col_counter = 0;
+        foreach(@cols) {
+            $return[$line_counter]{$_} = ($row[$col_counter]);
+            $col_counter++;
+        }
+        $line_counter++;
+    }
+
+    return \@return;
+}
+
+sub return_data {
+    my ($self, $sql, @bind_variables) = @_;
+
+    $self->_deprecation_warning("data");
+
+    return $self->get_data($sql, @bind_variables);
+}
+
+
+sub get_tsv_data {
+    my ($self, $sql, @bind_variables) = @_;
+    my $return;
+
+    $self->_reconnect_if_needed();
+
+    my $sth = $self->{dbh}->prepare($sql);
+    $self->log_debug($sql);
+    $sth->execute(@bind_variables) or croak $self->{dbh}->errstr;
+
+    $return .= join ("\t", @{$sth->{NAME}}) . "\n";
+
+    while (my @row = $sth->fetchrow_array) {
+        foreach (@row) {
+            $_ = '' unless defined;
+        }
+        $return .= join ("\t", @row) . "\n";
+    }
+
+    return $return;
+}
+
+sub return_tsv_data {
+    my ($self, $sql, @bind_variables) = @_;
+
+    $self->_deprecation_warning("tsv_data");
+
+    return $self->get_tsv_data($sql, @bind_variables);
+}
+
+
+
+sub insert {
+    my ($self, $sql, @bind_variables) = @_;
+
+    $self->_reconnect_if_needed();
+
+    my $sth = $self->{dbh}->prepare($sql);
+    $self->log_debug($sql);
+    $sth->execute(@bind_variables) or croak $self->{dbh}->errstr;
+
+    return $sth->{mysql_insertid};
+}
+
+
+sub execute {
+    my ($self, $sql, @bind_variables) = @_;
+
+    $self->_reconnect_if_needed();
+
+    my $sth = $self->{dbh}->prepare($sql);
+    $self->log_debug($sql);
+    $sth->execute(@bind_variables) or croak $self->{dbh}->errstr;
+
+    return 1;
+}
+
+
+sub log_debug {
+    my ($self, $sql) = @_;
+
+    if ($self->{debug}) {
+        $self->{count}++;
+        print STDERR "sql " . $self->{count} . ": '$sql'\n";
+    }
+}
+
+
+sub _reconnect_if_needed {
+    my ($self) = @_;
+
+    if (time - $self->{last_connection_check} > $self->{connection_check_threshold}) {
+        if (_check_connection($self->{dbh})) {
+            $self->{last_connection_check} = time;
+        } else {
+            $self->log_debug( "Database connection went away, reconnecting" );
+            $self->{dbh}= _get_connection($self->{settings});
+        }
+    }
+
+}
+
+
+sub _get_connection {
+    my ($self) = @_;
+
+    my $dsn = "DBI:mysql:database=" . $self->{db}
+        . ";host=" . $self->{host}
+        . ";port=" . $self->{port};
+
+    my $dbh = DBI->connect(
+        $dsn,
+        $self->{user},
+        $self->{password},
+        {
+            PrintError => 0,
+            mysql_auto_reconnect => 0,
+            mysql_enable_utf8 => 1,
+        },
+    ) or croak "Can't connect to database. Error: " . $DBI::errstr . " . Stopped";
+
+    return $dbh;
+}
+
+
+sub _check_connection {
+    my $dbh = shift;
+    return unless $dbh;
+    if (my $result = $dbh->ping) {
+        if (int($result)) {
+            # DB driver itself claims all is OK, trust it:
+            return 1;
+        } else {
+            # It was "0 but true", meaning the default DBI ping implementation
+            # Implement our own basic check, by performing a real simple
+            # query.
+            my $ok;
+            eval {
+                $ok = $dbh->do('select 1');
+            };
+            return $ok;
+        }
+    } else {
+        return;
+    }
+}
+
+sub _deprecation_warning {
+    my ($self, $name) = @_;
+
+    croak "Expected 'name'" unless defined $name;
+
+    warn "x"x78 . "\n";
+    warn "WARNING. SQL::Easy interface was changed. Since version 0.06 method return_$name() was deprecated. Use get_$name() instead.\n";
+    warn "x"x78 . "\n";
+
+}
+
+
+1;
+
+__END__
+
+=pod
 
 =head1 NAME
 
@@ -9,17 +320,7 @@ SQL::Easy - extremely easy access to sql data
 
 =head1 VERSION
 
-Version 0.06
-
-=head1 DESCRIPTION
-
-On cpan there are a lot of ORMs. The problem is that sometimes ORM are too
-complex. You don't need ORM in a simple script with couple requests. ORM is
-sometimes difficult to use, you need to learn its syntax. From the other hand
-you already knows SQL language.
-
-SQL::Easy give you easy access to data stored in databases using well known
-SQL language.
+version 0.07
 
 =head1 SYNOPSIS
 
@@ -94,20 +395,19 @@ If it passed more than 'connection_check_threshold' seconds between requests
 the module will check that db connection is alive and reconnect if it went
 away.
 
+=head1 DESCRIPTION
 
-=cut
+On cpan there are a lot of ORMs. The problem is that sometimes ORM are too
+complex. You don't need ORM in a simple script with couple requests. ORM is
+sometimes difficult to use, you need to learn its syntax. From the other hand
+you already knows SQL language.
 
-use strict;
-use warnings;
+SQL::Easy give you easy access to data stored in databases using well known
+SQL language.
 
-our $VERSION = 0.06;
-
-use DBI;
-use Carp;
+=encoding UTF-8
 
 =head1 METHODS
-
-=cut
 
 =head2 new
 
@@ -138,58 +438,11 @@ command to create SQL::Easy object:
         dbh => database(),
     } );
 
-=cut
-
-sub new {
-    my ($class, $params) = @_;
-    my $self  = {};
-
-    $self->{dbh} = $params->{dbh};
-    $self->{connection_check_threshold} = $params->{connection_check_threshold} || 30;
-    $self->{debug} = $params->{debug} || 0;
-    $self->{count} = 0;
-
-    unless ($self->{dbh}) {
-        $self->{settings} = {
-            db         => $params->{database},
-            user       => $params->{user},
-            password   => $params->{password},
-            host       => $params->{host} || '127.0.0.1',
-            port       => $params->{port} || 3306,
-        };
-
-        $self->{dbh} = _get_connection($self->{settings});
-    };
-
-    $self->{last_connection_check} = time;
-
-    bless($self, $class);
-    return $self;
-}
-
 =head2 get_dbh
 
 B<Get:> 1) $self
 
 B<Return:> 1) $ with dbi handler
-
-=cut
-
-sub get_dbh {
-    my ($self) = @_;
-
-    $self->_reconnect_if_needed();
-
-    return $self->{dbh};
-}
-
-sub return_dbh {
-    my ($self) = @_;
-
-    $self->_deprecation_warning("dbh");
-
-    return $self->get_dbh();
-}
 
 =head2 get_one
 
@@ -197,92 +450,17 @@ B<Get:> 1) $self 2) $sql 3) @bind_variables
 
 B<Return:> 1) $ with the first value of request result
 
-=cut
-
-sub get_one {
-    my ($self, $sql, @bind_variables) = @_;
-
-    $self->_reconnect_if_needed();
-
-    my $sth = $self->{dbh}->prepare($sql);
-    $self->log_debug($sql);
-    $sth->execute(@bind_variables) or croak $self->{dbh}->errstr;
-
-    my @row = $sth->fetchrow_array;
-
-    return $row[0];
-}
-
-sub return_one {
-    my ($self, $sql, @bind_variables) = @_;
-
-    $self->_deprecation_warning("one");
-
-    return $self->get_one($sql, @bind_variables);
-}
-
 =head2 get_row
 
 B<Get:> 1) $self 2) $sql 3) @bind_variables
 
 B<Return:> 1) @ with first row in result table
 
-=cut
-
-sub get_row {
-    my ($self, $sql, @bind_variables) = @_;
-
-    $self->_reconnect_if_needed();
-
-    my $sth = $self->{dbh}->prepare($sql);
-    $self->log_debug($sql);
-    $sth->execute(@bind_variables) or croak $self->{dbh}->errstr;
-
-    my @row = $sth->fetchrow_array;
-
-    return @row;
-}
-
-sub return_row {
-    my ($self, $sql, @bind_variables) = @_;
-
-    $self->_deprecation_warning("row");
-
-    return $self->get_row($sql, @bind_variables);
-}
-
 =head2 get_col
 
 B<Get:> 1) $self 2) $sql 3) @bind_variables
 
 B<Return:> 1) @ with first column in result table
-
-=cut
-
-sub get_col {
-    my ($self, $sql, @bind_variables) = @_;
-    my @return;
-
-    $self->_reconnect_if_needed();
-
-    my $sth = $self->{dbh}->prepare($sql);
-    $self->log_debug($sql);
-    $sth->execute(@bind_variables) or croak $self->{dbh}->errstr;
-
-    while (my @row = $sth->fetchrow_array) {
-        push @return, $row[0];
-    }
-
-    return @return;
-}
-
-sub return_col {
-    my ($self, $sql, @bind_variables) = @_;
-
-    $self->_deprecation_warning("col");
-
-    return $self->get_col($sql, @bind_variables);
-}
 
 =head2 get_data
 
@@ -300,44 +478,6 @@ Sample usage:
     for(my $i = 0; $i <= $#{$a}; $i++) {
         print $a->[$i]{filename}, "\n";
     }
-
-=cut
-
-sub get_data {
-    my ($self, $sql, @bind_variables) = @_;
-    my @return;
-
-    $self->_reconnect_if_needed();
-
-    my $sth = $self->{dbh}->prepare($sql);
-    $self->log_debug($sql);
-    $sth->execute(@bind_variables) or croak $self->{dbh}->errstr;
-
-    my @cols = @{$sth->{NAME}};
-
-    my @row;
-    my $line_counter = 0;
-    my $col_counter = 0;
-
-    while (@row = $sth->fetchrow_array) {
-        $col_counter = 0;
-        foreach(@cols) {
-            $return[$line_counter]{$_} = ($row[$col_counter]);
-            $col_counter++;
-        }
-        $line_counter++;
-    }
-
-    return \@return;
-}
-
-sub return_data {
-    my ($self, $sql, @bind_variables) = @_;
-
-    $self->_deprecation_warning("data");
-
-    return $self->get_data($sql, @bind_variables);
-}
 
 =head2 get_tsv_data
 
@@ -357,39 +497,6 @@ It will output the text below (with the tabs as separators).
     2010-07-14 18:30:31     Hello, World!
     2010-08-02 17:13:35     use perl or die
 
-=cut
-
-sub get_tsv_data {
-    my ($self, $sql, @bind_variables) = @_;
-    my $return;
-
-    $self->_reconnect_if_needed();
-
-    my $sth = $self->{dbh}->prepare($sql);
-    $self->log_debug($sql);
-    $sth->execute(@bind_variables) or croak $self->{dbh}->errstr;
-
-    $return .= join ("\t", @{$sth->{NAME}}) . "\n";
-
-    while (my @row = $sth->fetchrow_array) {
-        foreach (@row) {
-            $_ = '' unless defined;
-        }
-        $return .= join ("\t", @row) . "\n";
-    }
-
-    return $return;
-}
-
-sub return_tsv_data {
-    my ($self, $sql, @bind_variables) = @_;
-
-    $self->_deprecation_warning("tsv_data");
-
-    return $self->get_tsv_data($sql, @bind_variables);
-}
-
-
 =head2 insert
 
 B<Get:> 1) $self 2) $sql 3) @bind_variables
@@ -397,20 +504,6 @@ B<Get:> 1) $self 2) $sql 3) @bind_variables
 B<Return:> 1) $ with id of inserted record
 
 Sub executes sql with bind variables and returns id of inseted record
-
-=cut
-
-sub insert {
-    my ($self, $sql, @bind_variables) = @_;
-
-    $self->_reconnect_if_needed();
-
-    my $sth = $self->{dbh}->prepare($sql);
-    $self->log_debug($sql);
-    $sth->execute(@bind_variables) or croak $self->{dbh}->errstr;
-
-    return $sth->{mysql_insertid};
-}
 
 =head2 execute
 
@@ -420,20 +513,6 @@ B<Return:> -
 
 Sub just executes sql that it recieves and returns nothing interesting
 
-=cut
-
-sub execute {
-    my ($self, $sql, @bind_variables) = @_;
-
-    $self->_reconnect_if_needed();
-
-    my $sth = $self->{dbh}->prepare($sql);
-    $self->log_debug($sql);
-    $sth->execute(@bind_variables) or croak $self->{dbh}->errstr;
-
-    return 1;
-}
-
 =head2 log_debug
 
 B<Get:> 1) $self 2) $sql
@@ -441,17 +520,6 @@ B<Get:> 1) $self 2) $sql
 B<Return:> -
 
 If the debug is turned on sub wll print $sql to STDERR
-
-=cut
-
-sub log_debug {
-    my ($self, $sql) = @_;
-
-    if ($self->{debug}) {
-        $self->{count}++;
-        print STDERR "sql " . $self->{count} . ": '$sql'\n";
-    }
-}
 
 =begin comment _reconnect_if_needed
 
@@ -465,22 +533,6 @@ updates stored dbh.
 
 =end comment
 
-=cut
-
-sub _reconnect_if_needed {
-    my ($self) = @_;
-
-    if (time - $self->{last_connection_check} > $self->{connection_check_threshold}) {
-        if (_check_connection($self->{dbh})) {
-            $self->{last_connection_check} = time;
-        } else {
-            $self->log_debug( "Database connection went away, reconnecting" );
-            $self->{dbh}= _get_connection($self->{settings});
-        }
-    }
-
-}
-
 =begin comment _get_connection
 
 B<Get:> 1) $self
@@ -490,29 +542,6 @@ B<Return:> -
 Gets hashref with connection parameters and returns db
 
 =end comment
-
-=cut
-
-sub _get_connection {
-    my ($self) = @_;
-
-    my $dsn = "DBI:mysql:database=" . $self->{db}
-        . ";host=" . $self->{host}
-        . ";port=" . $self->{port};
-
-    my $dbh = DBI->connect(
-        $dsn,
-        $self->{user},
-        $self->{password},
-        {
-            PrintError => 0,
-            mysql_auto_reconnect => 0,
-            mysql_enable_utf8 => 1,
-        },
-    );
-
-    return $dbh;
-}
 
 =begin comment _check_connection
 
@@ -527,45 +556,6 @@ Dancer::Plugin::Database.
 
 =end comment
 
-=cut
-
-sub _check_connection {
-    my $dbh = shift;
-    return unless $dbh;
-    if (my $result = $dbh->ping) {
-        if (int($result)) {
-            # DB driver itself claims all is OK, trust it:
-            return 1;
-        } else {
-            # It was "0 but true", meaning the default DBI ping implementation
-            # Implement our own basic check, by performing a real simple
-            # query.
-            my $ok;
-            eval {
-                $ok = $dbh->do('select 1');
-            };
-            return $ok;
-        }
-    } else {
-        return;
-    }
-}
-
-sub _deprecation_warning {
-    my ($self, $name) = @_;
-
-    croak "Expected 'name'" unless defined $name;
-
-    warn "x"x78 . "\n";
-    warn "WARNING. SQL::Easy interface was changed. Since version 0.06 method return_$name() was deprecated. Use get_$name() instead.\n";
-    warn "x"x78 . "\n";
-
-}
-
-=head1 AUTHOR
-
-Ivan Bessarabov, C<< <ivan@bessarabov.ru> >>
-
 =head1 SOURCE CODE
 
 The source code for this module is hosted on GitHub
@@ -576,16 +566,15 @@ L<https://github.com/bessarabov/SQL-Easy>
 Please report any bugs or feature requests in GitHub Issues
 L<https://github.com/bessarabov/SQL-Easy>
 
-=head1 LICENSE AND COPYRIGHT
+=head1 AUTHOR
 
-Copyright 2012 Ivan Bessarabov.
+Ivan Bessarabov <ivan@bessarabov.ru>
 
-This program is free software; you can redistribute it and/or modify it
-under the terms of either: the GNU General Public License as published
-by the Free Software Foundation; or the Artistic License.
+=head1 COPYRIGHT AND LICENSE
 
-See http://dev.perl.org/licenses/ for more information.
+This software is copyright (c) 2010 by Ivan Bessarabov.
+
+This is free software; you can redistribute it and/or modify it under
+the same terms as the Perl 5 programming language system itself.
 
 =cut
-
-1;
