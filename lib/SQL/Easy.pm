@@ -1,6 +1,6 @@
 package SQL::Easy;
 {
-  $SQL::Easy::VERSION = '0.07';
+  $SQL::Easy::VERSION = '1.0.0';
 }
 
 # ABSTRACT: extremely easy access to sql data
@@ -320,7 +320,7 @@ SQL::Easy - extremely easy access to sql data
 
 =head1 VERSION
 
-version 0.07
+version 1.0.0
 
 =head1 SYNOPSIS
 
@@ -404,6 +404,9 @@ you already knows SQL language.
 
 SQL::Easy give you easy access to data stored in databases using well known
 SQL language.
+
+SQL::Easy version numbers uses Semantic Versioning standart.
+Please visit L<http://semver.org/> to find out all about this great thing.
 
 =encoding UTF-8
 
