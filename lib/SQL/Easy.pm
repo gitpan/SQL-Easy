@@ -1,6 +1,6 @@
 package SQL::Easy;
 {
-  $SQL::Easy::VERSION = '1.0.0';
+  $SQL::Easy::VERSION = '1.0.1';
 }
 
 # ABSTRACT: extremely easy access to sql data
@@ -265,6 +265,7 @@ sub _get_connection {
         $self->{password},
         {
             PrintError => 0,
+            RaiseError => 1,
             mysql_auto_reconnect => 0,
             mysql_enable_utf8 => 1,
         },
@@ -320,7 +321,7 @@ SQL::Easy - extremely easy access to sql data
 
 =head1 VERSION
 
-version 1.0.0
+version 1.0.1
 
 =head1 SYNOPSIS
 
@@ -558,6 +559,14 @@ Based on sub with the same name created by David Precious in
 Dancer::Plugin::Database.
 
 =end comment
+
+=head1 CONTRIBUTORS
+
+=over 4
+
+=item * Igor Sverdlov
+
+=back
 
 =head1 SOURCE CODE
 
