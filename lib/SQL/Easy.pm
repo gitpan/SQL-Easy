@@ -1,6 +1,6 @@
 package SQL::Easy;
 {
-  $SQL::Easy::VERSION = '1.0.1';
+  $SQL::Easy::VERSION = '2.0.0';
 }
 
 # ABSTRACT: extremely easy access to sql data
@@ -16,27 +16,47 @@ use Carp;
 
 
 sub new {
-    my ($class, $params) = @_;
+    my ($class, @params) = @_;
+
+    if (ref $params[0] eq 'HASH') {
+        croak "Incorrect usage of SQL::Easy->new()."
+            . " Since version 2.0.0 SQL::Easy->new() need to recieve hash, not hashref."
+            ;
+    }
+    my %params = @params;
+
     my $self  = {};
 
-    $self->{dbh} = $params->{dbh};
-    $self->{connection_check_threshold} = $params->{connection_check_threshold} || 30;
-    $self->{debug} = $params->{debug} || 0;
+    $self->{dbh} = $params{dbh};
+    $self->{connection_check_threshold} = $params{connection_check_threshold} || 30;
     $self->{count} = 0;
 
     unless ($self->{dbh}) {
         $self->{settings} = {
-            db         => $params->{database},
-            user       => $params->{user},
-            password   => $params->{password},
-            host       => $params->{host} || '127.0.0.1',
-            port       => $params->{port} || 3306,
+            db         => $params{database},
+            user       => $params{user},
+            password   => $params{password},
+            host       => $params{host} || '127.0.0.1',
+            port       => $params{port} || 3306,
         };
 
         $self->{dbh} = _get_connection($self->{settings});
     };
 
     $self->{last_connection_check} = time;
+
+    if (defined $params{debug}) {
+        croak "Incorrect usage of SQL::Easy->new()."
+            . " Since version 2.0.0 SQL::Easy has no 'debug' parameter in new()."
+            ;
+    }
+
+    my $cb_before_execute = delete $params{cb_before_execute};
+    if (defined $cb_before_execute) {
+        croak "cb_before_execute should be coderef"
+            if ref($cb_before_execute) ne 'CODE';
+        $self->{_cb_before_execute} = $cb_before_execute;
+    }
 
     bless($self, $class);
     return $self;
@@ -51,14 +71,6 @@ sub get_dbh {
     return $self->{dbh};
 }
 
-sub return_dbh {
-    my ($self) = @_;
-
-    $self->_deprecation_warning("dbh");
-
-    return $self->get_dbh();
-}
-
 
 sub get_one {
     my ($self, $sql, @bind_variables) = @_;
@@ -66,20 +78,12 @@ sub get_one {
     $self->_reconnect_if_needed();
 
     my $sth = $self->{dbh}->prepare($sql);
-    $self->log_debug($sql);
+    $self->_run_cb_before_execute($sql, @bind_variables);
     $sth->execute(@bind_variables) or croak $self->{dbh}->errstr;
 
     my @row = $sth->fetchrow_array;
 
     return $row[0];
-}
-
-sub return_one {
-    my ($self, $sql, @bind_variables) = @_;
-
-    $self->_deprecation_warning("one");
-
-    return $self->get_one($sql, @bind_variables);
 }
 
 
@@ -89,20 +93,12 @@ sub get_row {
     $self->_reconnect_if_needed();
 
     my $sth = $self->{dbh}->prepare($sql);
-    $self->log_debug($sql);
+    $self->_run_cb_before_execute($sql, @bind_variables);
     $sth->execute(@bind_variables) or croak $self->{dbh}->errstr;
 
     my @row = $sth->fetchrow_array;
 
     return @row;
-}
-
-sub return_row {
-    my ($self, $sql, @bind_variables) = @_;
-
-    $self->_deprecation_warning("row");
-
-    return $self->get_row($sql, @bind_variables);
 }
 
 
@@ -113,7 +109,7 @@ sub get_col {
     $self->_reconnect_if_needed();
 
     my $sth = $self->{dbh}->prepare($sql);
-    $self->log_debug($sql);
+    $self->_run_cb_before_execute($sql, @bind_variables);
     $sth->execute(@bind_variables) or croak $self->{dbh}->errstr;
 
     while (my @row = $sth->fetchrow_array) {
@@ -121,14 +117,6 @@ sub get_col {
     }
 
     return @return;
-}
-
-sub return_col {
-    my ($self, $sql, @bind_variables) = @_;
-
-    $self->_deprecation_warning("col");
-
-    return $self->get_col($sql, @bind_variables);
 }
 
 
@@ -139,7 +127,7 @@ sub get_data {
     $self->_reconnect_if_needed();
 
     my $sth = $self->{dbh}->prepare($sql);
-    $self->log_debug($sql);
+    $self->_run_cb_before_execute($sql, @bind_variables);
     $sth->execute(@bind_variables) or croak $self->{dbh}->errstr;
 
     my @cols = @{$sth->{NAME}};
@@ -160,14 +148,6 @@ sub get_data {
     return \@return;
 }
 
-sub return_data {
-    my ($self, $sql, @bind_variables) = @_;
-
-    $self->_deprecation_warning("data");
-
-    return $self->get_data($sql, @bind_variables);
-}
-
 
 sub get_tsv_data {
     my ($self, $sql, @bind_variables) = @_;
@@ -176,7 +156,7 @@ sub get_tsv_data {
     $self->_reconnect_if_needed();
 
     my $sth = $self->{dbh}->prepare($sql);
-    $self->log_debug($sql);
+    $self->_run_cb_before_execute($sql, @bind_variables);
     $sth->execute(@bind_variables) or croak $self->{dbh}->errstr;
 
     $return .= join ("\t", @{$sth->{NAME}}) . "\n";
@@ -191,15 +171,6 @@ sub get_tsv_data {
     return $return;
 }
 
-sub return_tsv_data {
-    my ($self, $sql, @bind_variables) = @_;
-
-    $self->_deprecation_warning("tsv_data");
-
-    return $self->get_tsv_data($sql, @bind_variables);
-}
-
-
 
 sub insert {
     my ($self, $sql, @bind_variables) = @_;
@@ -207,7 +178,7 @@ sub insert {
     $self->_reconnect_if_needed();
 
     my $sth = $self->{dbh}->prepare($sql);
-    $self->log_debug($sql);
+    $self->_run_cb_before_execute($sql, @bind_variables);
     $sth->execute(@bind_variables) or croak $self->{dbh}->errstr;
 
     return $sth->{mysql_insertid};
@@ -220,20 +191,24 @@ sub execute {
     $self->_reconnect_if_needed();
 
     my $sth = $self->{dbh}->prepare($sql);
-    $self->log_debug($sql);
+    $self->_run_cb_before_execute($sql, @bind_variables);
     $sth->execute(@bind_variables) or croak $self->{dbh}->errstr;
 
     return 1;
 }
 
 
-sub log_debug {
-    my ($self, $sql) = @_;
+sub _run_cb_before_execute {
+    my ($self, $sql, @bind_variables) = @_;
 
-    if ($self->{debug}) {
-        $self->{count}++;
-        print STDERR "sql " . $self->{count} . ": '$sql'\n";
+    if (defined $self->{_cb_before_execute}) {
+        $self->{_cb_before_execute}->(
+            sql => $sql,
+            bind_variables => \@bind_variables,
+        );
     }
+
+    return '';
 }
 
 
@@ -244,7 +219,6 @@ sub _reconnect_if_needed {
         if (_check_connection($self->{dbh})) {
             $self->{last_connection_check} = time;
         } else {
-            $self->log_debug( "Database connection went away, reconnecting" );
             $self->{dbh}= _get_connection($self->{settings});
         }
     }
@@ -297,17 +271,6 @@ sub _check_connection {
     }
 }
 
-sub _deprecation_warning {
-    my ($self, $name) = @_;
-
-    croak "Expected 'name'" unless defined $name;
-
-    warn "x"x78 . "\n";
-    warn "WARNING. SQL::Easy interface was changed. Since version 0.06 method return_$name() was deprecated. Use get_$name() instead.\n";
-    warn "x"x78 . "\n";
-
-}
-
 
 1;
 
@@ -315,13 +278,15 @@ __END__
 
 =pod
 
+=encoding UTF-8
+
 =head1 NAME
 
 SQL::Easy - extremely easy access to sql data
 
 =head1 VERSION
 
-version 1.0.1
+version 2.0.0
 
 =head1 SYNOPSIS
 
@@ -343,28 +308,27 @@ Then we we can do some things with SQL::Easy
 
     use SQL::Easy;
 
-    my $se = SQL::Easy->new( {
+    my $se = SQL::Easy->new(
         database => 'blog',
         user     => 'user',
         password => 'secret',
         host     => '127.0.0.1',           # default '127.0.0.1'
         port     => 3306,                  # default 3306
         connection_check_threshold => 30,  # default 30
-        debug    => 0,                     # default 0
-    } );
+    );
 
     # get scalar
-    my $posts_count = $se->get_one("select count(id) from posts");
+    my $posts_count = $se->get_one('select count(id) from posts');
 
     # get list
     my ($dt, $title) = $se->get_row(
-        "select dt, title from posts where id = ?",
+        'select dt, title from posts where id = ?',
         1,
     );
 
     # get arrayref
     my $posts = $se->get_data(
-        "select dt_post, title from posts order by id"
+        'select dt_post, title from posts order by id',
     );
     # We will get
     #    [
@@ -379,16 +343,16 @@ Then we we can do some things with SQL::Easy
     #    ];
 
     my $post_id = $se->insert(
-        "insert into images ( dt_post, title ) values ( now(), ? )",
-        "My new idea"
+        'insert into images ( dt_post, title ) values ( now(), ? )',
+        'My new idea',
     );
     # $post_id is the id of the new row in table
 
     # Sometimes you don't need the any return value (when you delete or update
     # rows), you only need to execute some sql. You can do it by
     $se->execute(
-        "update posts set title = ? where id = ?",
-        "JAPH",
+        'update posts set title = ? where id = ?',
+        'JAPH',
         2,
     );
 
@@ -409,38 +373,55 @@ SQL language.
 SQL::Easy version numbers uses Semantic Versioning standart.
 Please visit L<http://semver.org/> to find out all about this great thing.
 
-=encoding UTF-8
-
 =head1 METHODS
 
 =head2 new
 
-B<Get:> 1) $class 2) $params - hashref with connection information
+B<Get:> 1) $class 2) $params - hashref with constraction information
 
 B<Return:> 1) object
 
-    my $se = SQL::Easy->new( {
+    my $se = SQL::Easy->new(
         database => 'blog',
         user     => 'user',
         password => 'secret',
         host     => '127.0.0.1',           # default '127.0.0.1'
         port     => 3306,                  # default 3306
         connection_check_threshold => 30,  # default 30
-        debug    => 0,                     # default 0
-    } );
+    );
 
 Or, if you already have dbh:
 
-    my $se2 = SQL::Easy->new( {
+    my $se2 = SQL::Easy->new(
         dbh => $dbh,
-    } );
+    );
 
 For example, if you are woring with Dancer::Plugin::Database you can use this
 command to create SQL::Easy object:
 
-    my $se3 = SQL::Easy->new( {
+    my $se3 = SQL::Easy->new(
         dbh => database(),
-    } );
+    );
+
+This is one special parameter `cb_before_execute`. It should recieve callback.
+This callback is run just before the sql is executed. The callback recieves
+hash with keys 'sql' and 'bind_variables' that contains the values. The return
+value of this callback is returned.
+
+    my $se4 = SQL::Easy->new(
+        ...
+        cb_before_execute => sub {
+            my (%params) = @_;
+
+            my $sql = delete $params{sql};
+            my $bind_variables = delete $params{bind_variables};
+
+            print $sql . "\n";
+            print join("\n", @{$bind_variables}) . "\n";
+
+            return '';
+        }
+    );
 
 =head2 get_dbh
 
@@ -492,7 +473,7 @@ B<Return:> 1) $ with tab separated db data
 Sample usage:
 
     print $se->get_tsv_data(
-        "select dt_post, title from posts order by id limit 2"
+        'select dt_post, title from posts order by id limit 2',
     );
 
 It will output the text below (with the tabs as separators).
@@ -517,13 +498,13 @@ B<Return:> -
 
 Sub just executes sql that it recieves and returns nothing interesting
 
-=head2 log_debug
+=begin comment _run_cb_before_execute
 
-B<Get:> 1) $self 2) $sql
+B<Get:> 1) $self 2) $sql 3) @bind_variables
 
 B<Return:> -
 
-If the debug is turned on sub wll print $sql to STDERR
+=end comment
 
 =begin comment _reconnect_if_needed
 
